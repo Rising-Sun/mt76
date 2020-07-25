@@ -138,11 +138,58 @@ void mt7915_dma_prefetch(struct mt7915_dev *dev)
 	mt76_wr(dev, MT_WFDMA1_RX_RING3_EXT_CTRL, PREFETCH(0x480, 0x0));
 }
 
+static u32 __mt7915_reg_addr(struct mt7915_dev *dev, u32 addr)
+{
+	if (addr < 0x100000)
+		return addr;
+
+	if (addr >= MT_WF_PHY_BASE)
+		return mt7915_reg_map_l2(dev, addr);
+
+	return mt7915_reg_map_l1(dev, addr);
+}
+
+static u32 mt7915_rr(struct mt76_dev *mdev, u32 offset)
+{
+	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
+	u32 addr = __mt7915_reg_addr(dev, offset);
+
+	return dev->bus_ops->rr(mdev, addr);
+}
+
+static void mt7915_wr(struct mt76_dev *mdev, u32 offset, u32 val)
+{
+	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
+	u32 addr = __mt7915_reg_addr(dev, offset);
+
+	dev->bus_ops->wr(mdev, addr, val);
+}
+
+static u32 mt7915_rmw(struct mt76_dev *mdev, u32 offset, u32 mask, u32 val)
+{
+	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
+	u32 addr = __mt7915_reg_addr(dev, offset);
+
+	return dev->bus_ops->rmw(mdev, addr, mask, val);
+}
+
 int mt7915_dma_init(struct mt7915_dev *dev)
 {
 	/* Increase buffer size to receive large VHT/HE MPDUs */
+	struct mt76_bus_ops *bus_ops;
 	int rx_buf_size = MT_RX_BUF_SIZE * 2;
 	int ret;
+
+	dev->bus_ops = dev->mt76.bus;
+	bus_ops = devm_kmemdup(dev->mt76.dev, dev->bus_ops, sizeof(*bus_ops),
+			       GFP_KERNEL);
+	if (!bus_ops)
+		return -ENOMEM;
+
+	bus_ops->rr = mt7915_rr;
+	bus_ops->wr = mt7915_wr;
+	bus_ops->rmw = mt7915_rmw;
+	dev->mt76.bus = bus_ops;
 
 	mt76_dma_attach(&dev->mt76);
 
